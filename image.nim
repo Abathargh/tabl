@@ -4,15 +4,8 @@ import pixie
 # PNG export
 # ---------------------------------------------------------------------------
 
-# JetBrains Mono (SIL OFL 1.1, see assets/fonts/OFL.txt), loaded at runtime
-# from assets/fonts next to the binary. TABS_FONT overrides the path.
 const fontFile = "JetBrainsMono-Regular.ttf"
-
-proc fontPath(): string =
-  result = getEnv("TABS_FONT", getAppDir() / "assets" / "fonts" / fontFile)
-  if not fileExists(result):
-    raise newException(IOError,
-      &"font not found at {result}, set TABS_FONT to a .ttf/.otf file")
+const fontPath = staticRead("assets" / "fonts" / fontFile)
 
 const pageParts = 10 ## parts per image, longer tabs span several files
 
@@ -79,7 +72,7 @@ proc renderPng(t: Tablature, page: seq[PageEntry], label, path: string) =
   let image = newImage(width.int, height.int)
   image.fill(rgba(255, 255, 255, 255))
   let ctx      = newContext(image)
-  let typeface = readTypeface(fontPath())
+  let typeface = readTypeface(fontPath)
   let ink      = rgba(30, 30, 30, 255)
   let faint    = rgba(140, 140, 140, 255)
 
