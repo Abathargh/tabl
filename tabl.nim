@@ -132,9 +132,9 @@ proc validField(s: string): bool =
 # Tabs directory
 # ---------------------------------------------------------------------------
 
-proc tabsDir(): string =
+proc tablDir(): string =
   ## Where tabs live when no directory is given.
-  getHomeDir() / ".tabs"
+  getHomeDir() / ".tabl"
 
 proc tildify(path: string): string =
   let home = getHomeDir().strip(leading = false, chars = {DirSep})
@@ -798,10 +798,10 @@ proc draw(ed: Editor) =
 
 proc newEditor(target: string): Editor =
   ## target is a directory to browse or a tab file to open, browsing the
-  ## directory it is in. Without one, tabs are browsed in tabsDir().
+  ## directory it is in. Without one, tabs are browsed in tablDir().
   result = Editor(running: true, focus: focusFiles)
   if target.len == 0:
-    result.dir = tabsDir()
+    result.dir = tablDir()
     createDir(result.dir)
   elif dirExists(target):
     result.dir = target.absolutePath.normalizedPath
@@ -839,16 +839,16 @@ proc runEditor*(target: string) =
 when isMainModule:
   try:
     if paramCount() >= 2 and paramStr(1) == "--png":
-      # Headless export: tabs --png file [out.png], file is looked up in
-      # tabsDir() when not found as given, out defaults to the current dir.
+      # Headless export: tabl --png file [out.png], file is looked up in
+      # tablDir() when not found as given, out defaults to the current dir.
       var src = paramStr(2)
-      if not fileExists(src) and fileExists(tabsDir() / src):
-        src = tabsDir() / src
+      if not fileExists(src) and fileExists(tablDir() / src):
+        src = tablDir() / src
       let png = if paramCount() >= 3: paramStr(3)
                 else: src.extractFilename.changeFileExt("png")
       echo &"exported {parseTablature(src).exportPngs(png).describe}"
     else:
-      # tabs [dir | file]
+      # tabl [dir | file]
       runEditor(if paramCount() >= 1: paramStr(1) else: "")
   except CatchableError as e:
     stderr.writeLine &"error: {e.msg}"
