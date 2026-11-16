@@ -14,19 +14,19 @@ type
     tuning*:     seq[char]
 
   StringNotation* = object
-    note*:  int
-    index*: int
+    noteOrSymbol*: string
+    index*:        int
 
   TabPart* = object
     repeats*: int
-    tabs*: Table[int, seq[StringNotation]]
+    tabs*:    Table[int, seq[StringNotation]]
 
   TabSection* = object
     name*:    string
     parts*:   seq[TabPart]
 
   Tablature* = object
-    header*:  TabHeader
+    header*:   TabHeader
     sections*: seq[TabSection]
 
 proc parseTuning(stun: string): seq[char] =
@@ -58,21 +58,30 @@ proc parseHeader(data: string): TabHeader =
         fmt"bad tab header, invalid element {entry[0]}"
       )
 
+proc isValidNoteOrSymbol(data: string): bool =
+  try:
+    return parseInt(data) >= 0
+  except ValueError:
+    return data == "h" or data == "p"
+
 proc parseNotations(data: string): seq[StringNotation] =
   let entries = data.strip.split(";")
   for entry in entries:
-    let pairs = entry.split(",").mapIt(it.parseInt)
+    let pairs = entry.split(",")
     
     if pairs.len != 2:
       raise newException(ValueError, fmt"bad tab entry: {entry}")
 
     let note = pairs[0]
-    let idx  = pairs[1]
+    let idx  = pairs[1].parseInt()
 
-    if note < 0 or idx < 0:
-      raise newException(ValueError, fmt"note ({note}) or idx ({idx}) < 0")
+    if idx < 0:
+      raise newException(ValueError, fmt"idx ({idx}) < 0")
 
-    result.add StringNotation(note: note, index: idx)
+    if not isValidNoteOrSymbol(note):
+      raise newException(ValueError, fmt"not a valid note or symbol ({note})")
+
+    result.add StringNotation(noteOrSymbol: note, index: idx)
 
 proc parsePart(data: string, tuning: seq[char]): TabPart =
   let split = data.splitLines()
