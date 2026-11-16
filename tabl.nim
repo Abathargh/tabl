@@ -62,18 +62,37 @@ proc trimStrings(p: var TabPart, count: int): int =
       if p.tabs[i].len > 0: inc result
       p.tabs.del i
 
-proc fretAt(p: TabPart, s, idx: int): int =
+proc fretAt(p: TabPart, s, idx: int): string =
+  ## The fret number or technique symbol (h, p) at idx, "" when empty.
   for n in p.tabs.getOrDefault(s):
-    if n.index == idx: return n.note
-  -1
+    if n.index == idx: return n.noteOrSymbol
+  ""
+
+proc isSymbol(cell: string): bool =
+  ## Hammer-ons and pull-offs, as opposed to fret numbers.
+  cell.len > 0 and not cell[0].isDigit
+
+proc linkedRuns(p: TabPart, s: int): seq[Slice[int]] =
+  ## Spans of adjacent columns joined by hammer-ons/pull-offs, e.g. 0 h 2 on
+  ## columns 3..5. They are drawn close together ("0-h-2") instead of a full
+  ## cell apart.
+  let line = p.tabs.getOrDefault(s).sortedByIt(it.index)
+  var i = 0
+  while i < line.len:
+    var j = i
+    while j + 1 < line.len and line[j + 1].index == line[j].index + 1 and
+          (line[j].noteOrSymbol.isSymbol or line[j + 1].noteOrSymbol.isSymbol):
+      inc j
+    if j > i: result.add line[i].index .. line[j].index
+    i = j + 1
 
 proc clearFret(p: var TabPart, s, idx: int) =
   if s in p.tabs:
     p.tabs[s].keepItIf(it.index != idx)
 
-proc setFret(p: var TabPart, s, idx, fret: int) =
+proc setFret(p: var TabPart, s, idx: int, fret: string) =
   p.clearFret(s, idx)
-  p.tabs.mgetOrPut(s, @[]).add StringNotation(note: fret, index: idx)
+  p.tabs.mgetOrPut(s, @[]).add StringNotation(noteOrSymbol: fret, index: idx)
   p.tabs[s].sort(proc(a, b: StringNotation): int = cmp(a.index, b.index))
 
 proc shiftColumns(p: var TabPart, start, delta: int) =
@@ -120,7 +139,7 @@ proc serialize(t: Tablature): string =
       for i in 0 ..< t.header.tuning.len:
         let line = p.tabs.getOrDefault(i)
         if line.len == 0: continue
-        let body = line.mapIt(&"{it.note},{it.index}").join(";")
+        let body = line.mapIt(&"{it.noteOrSymbol},{it.index}").join(";")
         result.add &"{i}: {body}\n"
 
 proc validField(s: string): bool =
@@ -533,7 +552,13 @@ proc handleGrid(ed: Editor, k: int) =
   of key('0') .. key('9'):
     # Up to two digits per cell, e.g. typing 1 then 2 gives fret 12.
     ed.pending = if ed.pending.len == 1: ed.pending & chr(k) else: $chr(k)
-    ed.currentPart.setFret(s, ed.col, ed.pending.parseInt)
+    ed.currentPart.setFret(s, ed.col, $ed.pending.parseInt)
+    ed.dirty = true
+  of key('H'):
+    ed.currentPart.setFret(s, ed.col, "h")
+    ed.dirty = true
+  of key('P'):
+    ed.currentPart.setFret(s, ed.col, "p")
     ed.dirty = true
   of key('x'), int(EVENT_KEY_DELETE), int(EVENT_KEY_BACKSPACE),
      int(EVENT_KEY_BACKSPACE2):
@@ -717,16 +742,35 @@ proc drawGrid(ed: Editor, w, bottom: int) =
     for r, s in strs:
       if y > limit: break
       drawText(&"{($s).toUpperAscii} |", x0 + 2, y, accent, bg)
+      let runs = p.linkedRuns(ed.tab.slot(r))
+      proc inRun(c: int): bool = runs.anyIt(c in it)
+      proc colors(fret: string, onCursor: bool): (uint32, uint32) =
+        if onCursor:          (FG_COLOR_BLACK, BG_COLOR_CYAN)
+        elif fret.len == 0:   (dim, bg)
+        elif fret.isSymbol:   (FG_COLOR_MAGENTA_BRIGHT, bg)
+        else:                 (FG_COLOR_YELLOW_BRIGHT, bg)
+
       for c in ed.scroll ..< last:
-        let fret = p.fretAt(ed.tab.slot(r), c)
-        let cell = if fret < 0: "---" else: ($fret).alignLeft(cellWidth, '-')
-        let x    = gridX + (c - ed.scroll) * cellWidth
         let onCursor = focused and current and r == ed.row and c == ed.col
-        let (cfg, cbg) =
-          if onCursor:   (FG_COLOR_BLACK, BG_COLOR_CYAN)
-          elif fret < 0: (dim, bg)
-          else:          (FG_COLOR_YELLOW_BRIGHT, bg)
-        drawText(cell, x, y, cfg, cbg)
+        # Linked notes are drawn below, their cells only get the string.
+        let fret = if c.inRun: "" else: p.fretAt(ed.tab.slot(r), c)
+        let (cfg, cbg) = colors(fret, onCursor and not c.inRun)
+        drawText(fret.alignLeft(cellWidth, '-'),
+                 gridX + (c - ed.scroll) * cellWidth, y, cfg, cbg)
+
+      # Each run is joined by single dashes and centered on its cells, e.g.
+      # "--0-h-2--", which stays within the cells the run covers.
+      for run in runs:
+        let texts = toSeq(run).mapIt(p.fretAt(ed.tab.slot(r), it))
+        let total = texts.mapIt(it.len).foldl(a + b) + texts.len - 1
+        var pos   = run.a * cellWidth + (run.len * cellWidth - total) div 2
+        for i, text in texts:
+          let c = run.a + i
+          if pos >= ed.scroll * cellWidth and pos + text.len <= last * cellWidth:
+            let onCursor = focused and current and r == ed.row and c == ed.col
+            let (cfg, cbg) = colors(text, onCursor)
+            drawText(text, gridX + pos - ed.scroll * cellWidth, y, cfg, cbg)
+          pos += text.len + 1
       drawText("|", gridX + (last - ed.scroll) * cellWidth, y, accent, bg)
       inc y
     inc y
@@ -748,7 +792,7 @@ proc helpItems(ed: Editor): seq[string] =
         "enter edit", "h tabs", "e header", "t tuning", "N new tab",
         "p export png", "s save", "q quit"]
     of focusGrid:
-      @["hjkl move", "0-9 fret", "x clear", "i insert col", "D delete col",
+      @["hjkl move", "0-9 fret", "H hammer-on", "P pull-off", "x clear", "i insert col", "D delete col",
         "a add part", "y dup part", "X delete part", "J/K reorder parts",
         "+/-/n repeats", "esc back", "p export png", "s save", "q quit"]
 

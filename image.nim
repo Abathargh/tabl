@@ -45,6 +45,7 @@ proc renderPng(t: Tablature, page: seq[PageEntry], label, path: string) =
     headH    = 36'f32
     staffGap = 28'f32
     maxCols  = 40
+    linkGap  = 12'f32 ## string visible between hammer-on/pull-off notes
 
   let strs   = t.strings
   let staffH = strs.len.float32 * rowH
@@ -72,7 +73,7 @@ proc renderPng(t: Tablature, page: seq[PageEntry], label, path: string) =
   let image = newImage(width.int, height.int)
   image.fill(rgba(255, 255, 255, 255))
   let ctx      = newContext(image)
-  let typeface = readTypeface(fontPath)
+  let typeface = parseTtf(fontPath)
   let ink      = rgba(30, 30, 30, 255)
   let faint    = rgba(140, 140, 140, 255)
 
@@ -127,15 +128,29 @@ proc renderPng(t: Tablature, page: seq[PageEntry], label, path: string) =
                 14, ink)
 
         for r in 0 ..< strs.len:
+          # Notes joined by hammer-ons/pull-offs sit close together, centered
+          # on the columns they cover, instead of a full column apart.
+          var xs = toSeq(cols).mapIt(x0 + (it - cols.a + 1).float32 * colW)
+          for run in p.linkedRuns(t.slot(r)):
+            let span = max(run.a, cols.a) .. min(run.b, cols.b)
+            if span.len < 2: continue
+            let ws    = toSeq(span).mapIt(
+              font(14).layoutBounds(p.fretAt(t.slot(r), it)).x)
+            let total = ws.foldl(a + b) + (ws.len - 1).float32 * linkGap
+            var x     = (xs[span.a - cols.a] + xs[span.b - cols.a] - total) / 2
+            for i, w in ws:
+              xs[span.a - cols.a + i] = x + w / 2
+              x += w + linkGap
+
           for c in cols:
             let fret = p.fretAt(t.slot(r), c)
-            if fret < 0: continue
-            let cx = x0 + (c - cols.a + 1).float32 * colW
+            if fret.len == 0: continue
+            let cx = xs[c - cols.a]
             # Blank the string behind the number so it stays readable.
             ctx.fillStyle = rgba(255, 255, 255, 255)
-            let w = font(14).layoutBounds($fret).x + 6
+            let w = font(14).layoutBounds(fret).x + 6
             ctx.fillRect(cx - w / 2, lineY(r) - 8, w, 16)
-            put($fret, cx, lineY(r), 14, ink, true)
+            put(fret, cx, lineY(r), 14, ink, true)
 
         y += staffH + staffGap
 
